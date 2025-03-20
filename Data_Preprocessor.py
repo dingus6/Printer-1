@@ -57,7 +57,7 @@ class CryptoDataPreprocessor:
                              how='left', suffixes=('', '_liq'))
         
         # Fill missing values with forward fill only
-        data.fillna(method='ffill', inplace=True)
+        data = data.ffill()
         data.dropna(inplace=True)  # Drop any remaining NAs
         
         return data
@@ -89,7 +89,7 @@ class CryptoDataPreprocessor:
         candle_df['MA_24h'] = candle_df['close'].rolling(window=24, min_periods=1).mean()
         
         # Forward fill any NaN values from rolling calculations
-        candle_df.fillna(method='ffill', inplace=True)
+        candle_df = candle_df.ffill()
         
         # RSI calculations
         candle_df['RSI_6h'] = self.compute_rsi(candle_df['close'], 6)
@@ -120,7 +120,7 @@ class CryptoDataPreprocessor:
             fear_greed_df.drop('fng_classification', axis=1, inplace=True)
         
         # Upsample to hourly frequency
-        hourly_fear_greed = fear_greed_df.reindex(hourly_index, method='ffill')
+        hourly_fear_greed = fear_greed_df.reindex(hourly_index).ffill()
         
         return hourly_fear_greed
     
@@ -140,7 +140,7 @@ class CryptoDataPreprocessor:
         liq_df['OI_Change'] = liq_df['open_interest'].pct_change()
         
         # Upsample to hourly frequency
-        liq_hourly = liq_df.reindex(hourly_index, method='ffill')
+        liq_hourly = liq_df.reindex(hourly_index).ffill()
         
         return liq_hourly
     
@@ -292,7 +292,7 @@ if __name__ == "__main__":
     )
     
     # Prepare data with custom sequence length and forecast horizon
-    data_dict = preprocessor.prepare_data(sequence_length=4, forecast_horizon=1)
+    data_dict = preprocessor.prepare_data(sequence_length=24, forecast_horizon=1)
     
     # Access data loaders and other information
     train_loader = data_dict['train_loader']
