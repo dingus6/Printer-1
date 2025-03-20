@@ -5,15 +5,17 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 class FinancialDataPreprocessor:
-    def __init__(self, hourly_data_path, fear_greed_data_path, export_path=None):
+    def __init__(self, hourly_data_path, fear_greed_data_path, liquidations_data_path=None):
         self.hourly_data_path = hourly_data_path
         self.fear_greed_data_path = fear_greed_data_path
+        self.liquidations_data_path = liquidations_data_path
         self.hourly_scaler = StandardScaler()
         self.fear_greed_scaler = StandardScaler()
-        self.export_path = export_path
+        self.liquidations_scaler = StandardScaler() if liquidations_data_path else None
         
         self.hourly_data = self._load_hourly_data()
         self.fear_greed_data = self._load_fear_greed_data()
+        self.liquidations_data = self._load_liquidations_data() if liquidations_data_path else None
         
     def _load_hourly_data(self):
         df = pd.read_csv(self.hourly_data_path)
@@ -24,19 +26,6 @@ class FinancialDataPreprocessor:
             
         df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
         df.set_index('Timestamp', inplace=True)
-        
-        # Add time-based features
-        df['hour_of_day'] = df.index.hour
-        df['day_of_week'] = df.index.dayofweek
-        df['is_weekend'] = df['day_of_week'].apply(lambda x: 1 if x >= 5 else 0)
-        
-        # Calculate hour of day as sine and cosine components for cyclical nature
-        df['hour_sin'] = np.sin(2 * np.pi * df['hour_of_day']/24)
-        df['hour_cos'] = np.cos(2 * np.pi * df['hour_of_day']/24)
-        
-        # Calculate day of week as sine and cosine components
-        df['day_sin'] = np.sin(2 * np.pi * df['day_of_week']/7)
-        df['day_cos'] = np.cos(2 * np.pi * df['day_of_week']/7)
         
         df['PriceRange'] = df['High'] - df['Low']
         df['Volatility'] = df['PriceRange'] / df['Low']
@@ -55,6 +44,38 @@ class FinancialDataPreprocessor:
         # Calculate spread estimate from volume (inverse relationship with volume)
         # Higher volume typically means lower spread
         df['SpreadEstimate'] = (1 / df['Volume']) * df['Close'] * 10000  # Scale for readability
+        
+        return df
+    
+    def _load_liquidations_data(self):
+        df = pd.read_csv(self.liquidations_data_path, sep=None, engine='python')
+        
+        # Clean column names (remove spaces if any)
+        df.columns = [col.strip() for col in df.columns]
+        
+        # Convert timestamp to datetime
+        df['Timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+        df.drop('timestamp', axis=1, inplace=True)
+        df.set_index('Timestamp', inplace=True)
+        
+        # Calculate additional metrics
+        
+        # 1. Liquidation intensity (total liquidations relative to open interest)
+        df['total_liquidations'] = df['long_liq'] + df['short_liq']
+        df['liquidation_intensity'] = df['total_liquidations'] / (df['open_interest'] + 1e-9) * 100
+        
+        # 2. Open interest momentum with adjusted time periods
+        df['oi_momentum_4h'] = df['open_interest'].pct_change(periods=1).fillna(0)  # 4h change (since data is 4h)
+        df['oi_momentum_8h'] = df['open_interest'].pct_change(periods=2).fillna(0)  # 8h change
+        df['oi_momentum_16h'] = df['open_interest'].pct_change(periods=4).fillna(0)  # 16h change
+        
+        # 3. Divergence between OI and price (calculated after merge)
+        
+        # The CSV is in 4hr intervals, so resample to 1h and forward fill
+        df = df.resample('1H').first()
+        
+        # Forward fill all values to convert from 4hr to 1hr
+        df = df.ffill()
         
         return df
     
@@ -83,21 +104,8 @@ class FinancialDataPreprocessor:
         
         return df
     
-    def prepare_data(self, window_size=4, horizon=1, train_ratio=0.8, export_data=True):
-        merged_data = self._merge_hourly_and_fear_greed()
-        
-        # Export the combined data before additional processing
-        if export_data and self.export_path:
-            merged_data.reset_index().to_csv(f"{self.export_path}/combined_data.csv", index=False)
-            print(f"Combined data exported to {self.export_path}/combined_data.csv")
-        
-        # Add any additional processing here if needed
-        
-        # Export the fully processed data with all calculated columns
-        if export_data and self.export_path:
-            merged_data.reset_index().to_csv(f"{self.export_path}/processed_data.csv", index=False)
-            print(f"Processed data exported to {self.export_path}/processed_data.csv")
-        
+    def prepare_data(self, window_size=4, horizon=1, train_ratio=0.8):
+        merged_data = self._merge_all_data()
         X, y = self._create_sequences(merged_data, window_size, horizon)
         
         split_idx = int(len(X) * train_ratio)
@@ -108,8 +116,7 @@ class FinancialDataPreprocessor:
             'X_train': X_train,
             'y_train': y_train,
             'X_val': X_val,
-            'y_val': y_val,
-            'merged_data': merged_data  # Return the merged data for further inspection
+            'y_val': y_val
         }
     
     def _merge_hourly_and_fear_greed(self):
@@ -135,6 +142,52 @@ class FinancialDataPreprocessor:
         merged_data[cols_to_fill] = merged_data[cols_to_fill].ffill()
         
         return merged_data
+    
+    def _merge_all_data(self):
+        # First merge hourly and fear/greed
+        merged_hourly_fg = self._merge_hourly_and_fear_greed()
+        
+        # If we don't have liquidations data, return just the hourly+fear/greed
+        if self.liquidations_data is None:
+            return merged_hourly_fg
+        
+        # Merge with liquidations data
+        merged_all = pd.merge(
+            merged_hourly_fg,
+            self.liquidations_data,
+            left_index=True,
+            right_index=True,
+            how='left'
+        )
+        
+        # Forward fill missing liquidations values
+        liq_cols = [col for col in self.liquidations_data.columns if col in merged_all.columns]
+        merged_all[liq_cols] = merged_all[liq_cols].ffill()
+        
+        # Calculate price-OI divergence (needs both price and OI data)
+        if 'open_interest' in merged_all.columns and 'Close' in merged_all.columns:
+            # Use rolling windows to get more stable normalization points
+            window_size = 24  # 1 day rolling window
+            
+            # Calculate rolling price and OI values
+            merged_all['price_base'] = merged_all['Close'].rolling(window=window_size).mean().shift(window_size)
+            merged_all['oi_base'] = merged_all['open_interest'].rolling(window=window_size).mean().shift(window_size)
+            
+            # For initial values that don't have enough history, use the first available value
+            merged_all['price_base'] = merged_all['price_base'].fillna(merged_all['Close'].iloc[0])
+            merged_all['oi_base'] = merged_all['oi_base'].fillna(merged_all['open_interest'].iloc[0])
+            
+            # Normalize price and OI based on rolling window
+            merged_all['price_norm'] = merged_all['Close'] / merged_all['price_base']
+            merged_all['oi_norm'] = merged_all['open_interest'] / merged_all['oi_base']
+            
+            # Calculate divergence (positive when price rises faster than OI)
+            merged_all['price_oi_divergence'] = merged_all['price_norm'] - merged_all['oi_norm']
+            
+            # Clean up temporary columns
+            merged_all.drop(['price_base', 'oi_base', 'price_norm', 'oi_norm'], axis=1, inplace=True)
+        
+        return merged_all
     
     def _create_sequences(self, data, window_size, horizon):
         X = []
@@ -175,12 +228,6 @@ class FinancialDataPreprocessor:
             train_normalized[col] = train_targets[:, i]
             val_normalized[col] = val_targets[:, i]
         
-        # Export normalized data if export path is provided
-        if self.export_path:
-            train_normalized.reset_index().to_csv(f"{self.export_path}/normalized_train_data.csv", index=False)
-            val_normalized.reset_index().to_csv(f"{self.export_path}/normalized_val_data.csv", index=False)
-            print(f"Normalized data exported to {self.export_path}/normalized_train_data.csv and {self.export_path}/normalized_val_data.csv")
-        
         # Create sequences for both train and validation
         for df in [train_normalized, val_normalized]:
             for i in range(len(df) - window_size - horizon + 1):
@@ -206,8 +253,8 @@ class FinancialDataPreprocessor:
         
         return X_array, y_array
     
-    def get_dataloaders(self, window_size=4, horizon=1, batch_size=64, train_ratio=0.8, export_data=True):
-        data_dict = self.prepare_data(window_size, horizon, train_ratio, export_data)
+    def get_dataloaders(self, window_size=4, horizon=1, batch_size=64, train_ratio=0.8):
+        data_dict = self.prepare_data(window_size, horizon, train_ratio)
         
         train_dataset = FinancialDataset(
             data_dict['X_train'],
@@ -235,7 +282,7 @@ class FinancialDataPreprocessor:
             num_workers=4
         )
         
-        return train_loader, val_loader, data_dict['merged_data']
+        return train_loader, val_loader
     
     def get_feature_dim(self):
         if hasattr(self, 'feature_columns'):
@@ -243,44 +290,11 @@ class FinancialDataPreprocessor:
         else:
             # Estimate feature dimension before sequence creation
             target_cols = ['IsUp', 'Returns', 'PriceChangePercent', 'Volatility', 'SpreadEstimate']
-            merged_data = self._merge_hourly_and_fear_greed()
+            merged_data = self._merge_all_data()
             feature_cols = [col for col in merged_data.columns if col not in target_cols]
             
             print(f"Estimated feature dimension: {len(feature_cols)}")
             return len(feature_cols)
-    
-    def export_data_sample(self, sample_size=100):
-        """
-        Export a sample of the data at different processing stages for validation
-        """
-        if not self.export_path:
-            print("Export path not specified. Unable to export data samples.")
-            return
-            
-        # Export sample of raw hourly data
-        self.hourly_data.head(sample_size).reset_index().to_csv(
-            f"{self.export_path}/sample_hourly_raw.csv", index=False
-        )
-        
-        # Export sample of raw fear/greed data
-        self.fear_greed_data.head(sample_size).reset_index().to_csv(
-            f"{self.export_path}/sample_fear_greed_raw.csv", index=False
-        )
-        
-        # Export sample of merged data
-        merged_data = self._merge_hourly_and_fear_greed()
-        merged_data.head(sample_size).reset_index().to_csv(
-            f"{self.export_path}/sample_merged_data.csv", index=False
-        )
-        
-        print(f"Data samples exported to {self.export_path}")
-        
-        # Return a list of column names for reference
-        return {
-            'hourly_columns': list(self.hourly_data.columns),
-            'fear_greed_columns': list(self.fear_greed_data.columns),
-            'merged_columns': list(merged_data.columns)
-        }
 
 
 class FinancialDataset(Dataset):
