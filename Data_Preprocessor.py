@@ -292,7 +292,7 @@ if __name__ == "__main__":
     )
     
     # Prepare data with custom sequence length and forecast horizon
-    data_dict = preprocessor.prepare_data(sequence_length=24, forecast_horizon=1)
+    data_dict = preprocessor.prepare_data(sequence_length=4, forecast_horizon=1)
     
     # Access data loaders and other information
     train_loader = data_dict['train_loader']
