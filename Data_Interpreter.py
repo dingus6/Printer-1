@@ -1,258 +1,120 @@
 import pandas as pd
 import numpy as np
-from pathlib import Path
+import matplotlib.pyplot as plt
 import os
-import logging
+from data_preprocessor import FinancialDataPreprocessor
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# Create directories for analysis
+os.makedirs('data_analysis', exist_ok=True)
+os.makedirs('data_analysis/liquidations', exist_ok=True)
 
-class CryptoDataInterpreter:
-    """
-    Data interpreter for cryptocurrency data from multiple sources.
-    Handles loading and basic formatting of data files.
-    """
-    
-    def __init__(self, data_dir=None):
-        """
-        Initialize the data interpreter.
-        
-        Args:
-            data_dir (str, optional): Directory containing data files.
-        """
-        self.data_dir = Path(data_dir) if data_dir else Path("./data")
-        self.candles = None
-        self.orderbook = None
-        self.sentiment = None
-    
-    def load_candle_data(self, filename=None, from_csv=True):
-        """
-        Load hourly candle data with OHLCV.
-        
-        Args:
-            filename (str, optional): Name of the candle data file
-            from_csv (bool): If True, load from CSV, else from API (not implemented)
-        
-        Returns:
-            pd.DataFrame: Loaded candle data
-        """
-        if from_csv:
-            filepath = self.data_dir / (filename or "candles.csv")
-            logger.info(f"Loading candle data from {filepath}")
-            
-            try:
-                df = pd.read_csv(filepath)
-                
-                # Check required columns
-                required_cols = ["Timestamp", "Open", "Close", "High", "Low", "Volume"]
-                missing_cols = [col for col in required_cols if col not in df.columns]
-                
-                if missing_cols:
-                    raise ValueError(f"Candle data missing columns: {missing_cols}")
-                
-                # Convert timestamp to datetime
-                df["Timestamp"] = pd.to_datetime(df["Timestamp"])
-                df.set_index("Timestamp", inplace=True)
-                
-                # Ensure all price and volume data is numeric
-                for col in ["Open", "Close", "High", "Low", "Volume"]:
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
-                
-                self.candles = df
-                logger.info(f"Loaded {len(df)} candle records")
-                return df
-                
-            except Exception as e:
-                logger.error(f"Failed to load candle data: {e}")
-                raise
-        else:
-            # TODO: Implement API loading
-            logger.error("API loading not yet implemented")
-            raise NotImplementedError("API loading not yet implemented")
-    
-    def load_orderbook_data(self, filename=None, from_csv=True):
-        """
-        Load hourly orderbook data with Open Interest and Funding Rate.
-        
-        Args:
-            filename (str, optional): Name of the orderbook data file
-            from_csv (bool): If True, load from CSV, else from API (not implemented)
-        
-        Returns:
-            pd.DataFrame: Loaded orderbook data
-        """
-        if from_csv:
-            filepath = self.data_dir / (filename or "orderbook.csv")
-            logger.info(f"Loading orderbook data from {filepath}")
-            
-            try:
-                df = pd.read_csv(filepath)
-                
-                # Check required columns
-                required_cols = ["Timestamp", "Open Interest", "Funding Rate"]
-                missing_cols = [col for col in required_cols if col not in df.columns]
-                
-                if missing_cols:
-                    raise ValueError(f"Orderbook data missing columns: {missing_cols}")
-                
-                # Convert timestamp to datetime
-                df["Timestamp"] = pd.to_datetime(df["Timestamp"])
-                df.set_index("Timestamp", inplace=True)
-                
-                # Ensure all data is numeric
-                for col in ["Open Interest", "Funding Rate"]:
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
-                
-                self.orderbook = df
-                logger.info(f"Loaded {len(df)} orderbook records")
-                return df
-                
-            except Exception as e:
-                logger.error(f"Failed to load orderbook data: {e}")
-                raise
-        else:
-            # TODO: Implement API loading
-            logger.error("API loading not yet implemented")
-            raise NotImplementedError("API loading not yet implemented")
-    
-    def load_sentiment_data(self, filename=None, from_csv=True):
-        """
-        Load daily sentiment data with Fear and Greed index.
-        
-        Args:
-            filename (str, optional): Name of the sentiment data file
-            from_csv (bool): If True, load from CSV, else from API (not implemented)
-        
-        Returns:
-            pd.DataFrame: Loaded sentiment data
-        """
-        if from_csv:
-            filepath = self.data_dir / (filename or "sentiment.csv")
-            logger.info(f"Loading sentiment data from {filepath}")
-            
-            try:
-                df = pd.read_csv(filepath)
-                
-                # Check required columns
-                required_cols = ["Timestamp", "Fear and Greed Value", "Fear and Greed Classification"]
-                missing_cols = [col for col in required_cols if col not in df.columns]
-                
-                if missing_cols:
-                    raise ValueError(f"Sentiment data missing columns: {missing_cols}")
-                
-                # Convert timestamp to datetime
-                df["Timestamp"] = pd.to_datetime(df["Timestamp"])
-                df.set_index("Timestamp", inplace=True)
-                
-                # Ensure value is numeric
-                df["Fear and Greed Value"] = pd.to_numeric(df["Fear and Greed Value"], errors="coerce")
-                
-                self.sentiment = df
-                logger.info(f"Loaded {len(df)} sentiment records")
-                return df
-                
-            except Exception as e:
-                logger.error(f"Failed to load sentiment data: {e}")
-                raise
-        else:
-            # TODO: Implement API loading
-            logger.error("API loading not yet implemented")
-            raise NotImplementedError("API loading not yet implemented")
-    
-    def load_all_data(self, candle_file=None, orderbook_file=None, sentiment_file=None):
-        """
-        Load all data sources at once.
-        
-        Args:
-            candle_file (str, optional): Name of the candle data file
-            orderbook_file (str, optional): Name of the orderbook data file
-            sentiment_file (str, optional): Name of the sentiment data file
-        
-        Returns:
-            tuple: (candles_df, orderbook_df, sentiment_df)
-        """
-        candles = self.load_candle_data(filename=candle_file)
-        orderbook = self.load_orderbook_data(filename=orderbook_file)
-        sentiment = self.load_sentiment_data(filename=sentiment_file)
-        
-        return candles, orderbook, sentiment
-    
-    def check_data_alignment(self):
-        """
-        Check if the loaded datasets have aligned timestamps.
-        
-        Returns:
-            bool: True if data is properly aligned
-        """
-        if self.candles is None or self.orderbook is None:
-            logger.error("Candle and orderbook data must be loaded before checking alignment")
-            return False
-        
-        # Check hourly data alignment
-        hourly_indices = sorted(set(self.candles.index).intersection(set(self.orderbook.index)))
-        
-        # Check sentiment data if loaded (it's daily, so we'll be more flexible)
-        if self.sentiment is not None:
-            sentiment_dates = set(self.sentiment.index.date)
-            hourly_dates = set(pd.DatetimeIndex(hourly_indices).date)
-            
-            missing_dates = hourly_dates.difference(sentiment_dates)
-            if missing_dates:
-                logger.warning(f"Missing sentiment data for {len(missing_dates)} days")
-        
-        missing_candles = set(self.orderbook.index).difference(set(self.candles.index))
-        missing_orderbook = set(self.candles.index).difference(set(self.orderbook.index))
-        
-        if missing_candles or missing_orderbook:
-            logger.warning(f"Data misalignment: {len(missing_candles)} missing candles, {len(missing_orderbook)} missing orderbook entries")
-            return False
-        
-        logger.info(f"Data alignment check passed with {len(hourly_indices)} aligned hourly records")
-        return True
-    
-    def get_date_range(self):
-        """
-        Get the date range covered by the loaded data.
-        
-        Returns:
-            tuple: (start_date, end_date) as datetime objects
-        """
-        dates = []
-        
-        if self.candles is not None:
-            dates.extend([self.candles.index.min(), self.candles.index.max()])
-        
-        if self.orderbook is not None:
-            dates.extend([self.orderbook.index.min(), self.orderbook.index.max()])
-            
-        if self.sentiment is not None:
-            dates.extend([self.sentiment.index.min(), self.sentiment.index.max()])
-        
-        if not dates:
-            return None, None
-            
-        return min(dates), max(dates)
+# Initialize the preprocessor with the new liquidations data
+preprocessor = FinancialDataPreprocessor(
+    hourly_data_path='/root/hlmmnn/hourly_data.csv',
+    fear_greed_data_path='/root/hlmmnn/fear_greed_data/fear_greed_index_enhanced.csv',
+    liquidations_data_path='/root/hlmmnn/liquidations_data.csv'  # Path to your new CSV
+)
 
+# Get the merged data with all datasets
+merged_data = preprocessor._merge_all_data()
 
-# Example usage
-if __name__ == "__main__":
-    interpreter = CryptoDataInterpreter()
+# Analyze the "IsUp" distribution
+is_up_count = merged_data['IsUp'].value_counts()
+print("\nDirection distribution in full dataset:")
+print(is_up_count)
+print(f"Percentage of 'Up' (1): {100 * is_up_count.get(1, 0) / len(merged_data):.2f}%")
+print(f"Percentage of 'Down' (0): {100 * is_up_count.get(0, 0) / len(merged_data):.2f}%")
+
+# Calculate class weights
+total = len(merged_data)
+pos_weight = total / (2 * is_up_count.get(1, 0.5 * total))
+neg_weight = total / (2 * is_up_count.get(0, 0.5 * total))
+print(f"\nRecommended class weights:")
+print(f"Positive class weight: {pos_weight:.4f}")
+print(f"Negative class weight: {neg_weight:.4f}")
+
+# Plot the direction distribution
+plt.figure(figsize=(10, 6))
+merged_data['IsUp'].value_counts().plot(kind='bar', color=['red', 'green'])
+plt.title('Direction Distribution (0=Down, 1=Up)')
+plt.xlabel('Direction')
+plt.ylabel('Count')
+plt.savefig('data_analysis/direction_distribution.png')
+
+# Analyze price changes
+merged_data['PriceChangePercent'] = (merged_data['Close'] - merged_data['Open']) / merged_data['Open']
+price_changes = merged_data['PriceChangePercent']
+print(f"\nPrice change statistics:")
+print(f"Mean: {price_changes.mean():.6f}")
+print(f"Median: {price_changes.median():.6f}")
+print(f"Min: {price_changes.min():.6f}")
+print(f"Max: {price_changes.max():.6f}")
+
+# Plot price change distribution
+plt.figure(figsize=(12, 6))
+plt.hist(price_changes, bins=50, alpha=0.75)
+plt.axvline(x=0, color='r', linestyle='--')
+plt.title('Price Change Percentage Distribution')
+plt.xlabel('Price Change %')
+plt.ylabel('Frequency')
+plt.grid(True, alpha=0.3)
+plt.savefig('data_analysis/price_change_distribution.png')
+
+# Analyze the relationship between window size and price movements
+window_sizes = [4, 8, 12, 24]
+price_direction_stats = []
+for window in window_sizes:
+    # Create sequences
+    data_dict = preprocessor.prepare_data(window_size=window, horizon=1, train_ratio=0.8)
+    X_train, y_train = data_dict['X_train'], data_dict['y_train']
     
-    try:
-        candles, orderbook, sentiment = interpreter.load_all_data()
-        
-        if interpreter.check_data_alignment():
-            start_date, end_date = interpreter.get_date_range()
-            logger.info(f"Data covers period from {start_date} to {end_date}")
-            
-            # Print sample data
-            logger.info("\nCandle data sample:")
-            logger.info(candles.head())
-            
-            logger.info("\nOrderbook data sample:")
-            logger.info(orderbook.head())
-            
-            logger.info("\nSentiment data sample:")
-            logger.info(sentiment.head())
-    except Exception as e:
-        logger.error(f"Error in data interpretation: {e}")
+    # Get direction labels
+    directions = y_train[:, 0]  # First column is direction
+    
+    # Calculate stats
+    up_pct = np.mean(directions) * 100
+    price_direction_stats.append({
+        'Window Size': window, 
+        'Up_pct': up_pct, 
+        'Down_pct': 100 - up_pct,
+        'Count': len(directions)
+    })
+
+# Print window stats
+print("\nDirection distribution by window size:")
+for stat in price_direction_stats:
+    print(f"Window Size {stat['Window Size']}: {stat['Up_pct']:.2f}% Up, {stat['Down_pct']:.2f}% Down (n={stat['Count']})")
+
+# ============ LIQUIDATIONS DATA ANALYSIS ============
+
+# Check if liquidations data is available
+if preprocessor.liquidations_data is not None:
+    liq_data = preprocessor.liquidations_data
+    
+    print("\n===== LIQUIDATIONS DATA ANALYSIS =====")
+    print(f"Liquidations data shape: {liq_data.shape}")
+    print(f"Time range: {liq_data.index.min()} to {liq_data.index.max()}")
+    
+    # Basic statistics for liquidations
+    print("\nBasic statistics for key liquidations metrics:")
+    stats_cols = ['short_liq', 'long_liq', 'total_liquidations', 
+                  'liquidation_intensity', 'open_interest', 'ratio',
+                  'oi_momentum_4h', 'oi_momentum_8h', 'oi_momentum_16h']
+    
+    print(liq_data[stats_cols].describe())
+    
+    # Analyze correlation between liquidations and price movement
+    print("\nCorrelation between liquidations and price movement:")
+    correlation_data = merged_data[['IsUp', 'PriceChangePercent', 'Returns', 'Volatility']].copy()
+    
+    # Add liquidation features
+    for col in ['short_liq', 'long_liq', 'liquidation_intensity', 
+                'oi_momentum_4h', 'oi_momentum_8h', 'oi_momentum_16h',
+                'ratio', 'price_oi_divergence']:
+        if col in merged_data.columns:
+            correlation_data[col] = merged_data[col]
+    
+    print(correlation_data.corr()[['IsUp', 'PriceChangePercent', 'Returns', 'Volatility']].round(3))
+
+# Print completion message
+print("\nData analysis complete. Check the data_analysis directory for plots.")
