@@ -1,316 +1,181 @@
-import numpy as np
-import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers
-import logging
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import math
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_seq_length=5000):
+        super(PositionalEncoding, self).__init__()
+        
+        pe = torch.zeros(max_seq_length, d_model)
+        position = torch.arange(0, max_seq_length, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        
+        self.register_buffer('pe', pe.unsqueeze(0))
+        
+    def forward(self, x):
+        return x + self.pe[:, :x.size(1)]
 
-class CryptoTransformer:
-    """
-    Lightweight Transformer model for cryptocurrency price prediction.
-    Implements a simplified transformer architecture for time series forecasting.
-    """
-    
-    def __init__(self, 
-                seq_length=24,
-                n_features=None,
-                d_model=64,
-                num_heads=4,
-                dropout_rate=0.1,
-                ff_dim=128,
-                num_transformer_blocks=2):
-        """
-        Initialize the CryptoTransformer model.
+class FinancialTransformerModel(nn.Module):
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim=384,
+        num_heads=8,
+        transformer_layers=8,
+        dropout=0.25,
+        direction_threshold=0.45
+    ):
+        super(FinancialTransformerModel, self).__init__()
         
-        Args:
-            seq_length: Number of time steps in each input sequence
-            n_features: Number of features at each time step
-            d_model: Dimensionality of the transformer model
-            num_heads: Number of attention heads
-            dropout_rate: Dropout rate
-            ff_dim: Hidden layer size in feed forward network inside transformer
-            num_transformer_blocks: Number of transformer blocks to stack
-        """
-        self.seq_length = seq_length
-        self.n_features = n_features
-        self.d_model = d_model
-        self.num_heads = num_heads
-        self.dropout_rate = dropout_rate
-        self.ff_dim = ff_dim
-        self.num_transformer_blocks = num_transformer_blocks
-        self.model = None
-    
-    def _create_positional_encoding(self, position, d_model):
-        """Create positional encoding for transformer input."""
-        def get_angles(pos, i, d_model):
-            angle_rates = 1 / np.power(10000, (2 * (i // 2)) / np.float32(d_model))
-            return pos * angle_rates
+        self.direction_threshold = direction_threshold
+        self.hidden_dim = hidden_dim
+        self.input_dim = input_dim
         
-        angle_rads = get_angles(
-            np.arange(position)[:, np.newaxis],
-            np.arange(d_model)[np.newaxis, :],
-            d_model
+        # Log initialization information
+        print(f"Model initialized with input_dim={input_dim} (includes liquidations data if provided)")
+        
+        self.input_embedding = nn.Linear(input_dim, hidden_dim)
+        self.positional_encoding = PositionalEncoding(hidden_dim)
+        
+        transformer_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_dim,
+            nhead=num_heads,
+            dim_feedforward=hidden_dim * 4,
+            dropout=dropout,
+            batch_first=True
         )
         
-        # Apply sin to even indices in the array
-        angle_rads[:, 0::2] = np.sin(angle_rads[:, 0::2])
-        
-        # Apply cos to odd indices in the array
-        angle_rads[:, 1::2] = np.cos(angle_rads[:, 1::2])
-        
-        pos_encoding = angle_rads[np.newaxis, ...]
-        
-        return tf.cast(pos_encoding, dtype=tf.float32)
-    
-    def _transformer_encoder(self, inputs):
-        """Create a transformer encoder block."""
-        # Normalization and attention
-        x = layers.LayerNormalization(epsilon=1e-6)(inputs)
-        attention_output = layers.MultiHeadAttention(
-            key_dim=self.d_model // self.num_heads,
-            num_heads=self.num_heads,
-            dropout=self.dropout_rate
-        )(x, x)
-        attention_output = layers.Dropout(self.dropout_rate)(attention_output)
-        x1 = layers.Add()([attention_output, inputs])
-        
-        # Feed-forward network
-        x2 = layers.LayerNormalization(epsilon=1e-6)(x1)
-        x2 = layers.Conv1D(filters=self.ff_dim, kernel_size=1, activation='relu')(x2)
-        x2 = layers.Dropout(self.dropout_rate)(x2)
-        x2 = layers.Conv1D(filters=self.d_model, kernel_size=1)(x2)
-        x2 = layers.Dropout(self.dropout_rate)(x2)
-        
-        return layers.Add()([x1, x2])
-    
-    def build_model(self):
-        """
-        Build and compile the transformer model.
-        
-        Returns:
-            Compiled Keras model
-        """
-        if self.n_features is None:
-            raise ValueError("Number of features (n_features) must be specified")
-        
-        # Input layer
-        inputs = keras.Input(shape=(self.seq_length, self.n_features))
-        
-        # Embedding layer to convert inputs to d_model dimensions
-        embedding = layers.Conv1D(filters=self.d_model, kernel_size=1, activation='relu')(inputs)
-        
-        # Add positional encoding
-        pos_encoding = self._create_positional_encoding(self.seq_length, self.d_model)
-        x = embedding + pos_encoding
-        
-        # Dropout for regularization
-        x = layers.Dropout(self.dropout_rate)(x)
-        
-        # Stack transformer blocks
-        for _ in range(self.num_transformer_blocks):
-            x = self._transformer_encoder(x)
-        
-        # Global average pooling to get fixed-size output
-        x = layers.GlobalAveragePooling1D()(x)
-        
-        # Dense layer for processing pooled features
-        x = layers.Dense(self.d_model, activation='relu')(x)
-        x = layers.Dropout(self.dropout_rate)(x)
-        
-        # Multiple output heads
-        # 1. Direction prediction (binary classification)
-        direction_output = layers.Dense(1, activation='sigmoid', name='direction')(x)
-        
-        # 2. Category prediction (multi-class)
-        # 5 categories: Large_Down, Medium_Down, Small, Medium_Up, Large_Up
-        category_output = layers.Dense(5, activation='softmax', name='category')(x)
-        
-        # 3. Percentage change prediction (regression)
-        regression_output = layers.Dense(1, name='regression')(x)
-        
-        # Create model with multiple outputs
-        self.model = keras.Model(
-            inputs=inputs,
-            outputs=[direction_output, category_output, regression_output]
+        self.transformer_encoder = nn.TransformerEncoder(
+            transformer_layer,
+            num_layers=transformer_layers
         )
         
-        # Compile model with appropriate loss functions
-        self.model.compile(
-            optimizer=keras.optimizers.Adam(learning_rate=1e-4),
-            loss={
-                'direction': 'binary_crossentropy',
-                'category': 'categorical_crossentropy',
-                'regression': 'mse'
-            },
-            metrics={
-                'direction': ['accuracy'],
-                'category': ['accuracy'],
-                'regression': ['mae']
-            },
-            loss_weights={
-                'direction': 1.0,
-                'category': 1.0,
-                'regression': 0.5
-            }
+        self.feature_norm = nn.LayerNorm(hidden_dim)
+        
+        self.direction_pathway = nn.Sequential(
+            nn.Linear(hidden_dim * 3, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.LeakyReLU(0.1),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.BatchNorm1d(hidden_dim // 2),
+            nn.LeakyReLU(0.1),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, hidden_dim // 4),
+            nn.BatchNorm1d(hidden_dim // 4),
+            nn.LeakyReLU(0.1),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 4, 1)
         )
         
-        logger.info("Transformer model built and compiled")
-        logger.info(f"Input shape: {inputs.shape}")
-        logger.info(f"Model parameters: {self.model.count_params():,}")
+        self.volatility_pathway = nn.Sequential(
+            nn.Linear(hidden_dim * 3, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, 1)
+        )
         
-        return self.model
+        self.price_change_pathway = nn.Sequential(
+            nn.Linear(hidden_dim * 3, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, 1)
+        )
+        
+        self.spread_pathway = nn.Sequential(
+            nn.Linear(hidden_dim * 3, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, 1)
+        )
+        
+        self.feature_attention = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, 1)
+        )
+        
+        for m in self.direction_pathway.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_normal_(m.weight)
+                if m.bias is not None:
+                    nn.init.uniform_(m.bias, -0.05, 0.05)
     
-    def fit(self, X, y, validation_split=0.2, epochs=50, batch_size=32, callbacks=None):
-        """
-        Train the model.
-        
-        Args:
-            X: Input features (shape: [samples, seq_length, n_features])
-            y: Dictionary of targets with keys 'direction', 'category', 'regression'
-            validation_split: Fraction of data to use for validation
-            epochs: Number of training epochs
-            batch_size: Batch size
-            callbacks: Optional list of Keras callbacks
+    def forward(self, x):
+        # Check if input dimension matches model's expected dimension
+        if x.shape[2] != self.input_dim:
+            # This provides more helpful error messages during evaluation
+            raise ValueError(
+                f"Input feature dimension mismatch: model expects {self.input_dim} features, "
+                f"but received {x.shape[2]} features. This might be because the model was trained "
+                f"with a different feature set (e.g., with or without liquidations data)."
+            )
             
-        Returns:
-            Training history
-        """
-        if self.model is None:
-            self.n_features = X.shape[2]
-            self.build_model()
+        x = self.input_embedding(x)
+        x = self.positional_encoding(x)
+        x = self.transformer_encoder(x)
+        x = self.feature_norm(x)
         
-        if callbacks is None:
-            # Define default callbacks
-            callbacks = [
-                keras.callbacks.EarlyStopping(
-                    monitor='val_loss',
-                    patience=10,
-                    restore_best_weights=True
-                ),
-                keras.callbacks.ReduceLROnPlateau(
-                    monitor='val_loss',
-                    factor=0.5,
-                    patience=5,
-                    min_lr=1e-6
-                )
-            ]
+        last_hidden = x[:, -1]
+        avg_hidden = torch.mean(x, dim=1)
         
-        # Training
-        history = self.model.fit(
-            X,
-            {
-                'direction': y['direction'],
-                'category': y['category'],
-                'regression': y['regression']
-            },
-            validation_split=validation_split,
-            epochs=epochs,
-            batch_size=batch_size,
-            callbacks=callbacks,
-            verbose=1
-        )
+        attn_weights = self.feature_attention(x).squeeze(-1)
+        attn_weights = F.softmax(attn_weights, dim=1).unsqueeze(-1)
+        attn_hidden = torch.sum(x * attn_weights, dim=1)
         
-        return history
-    
-    def predict(self, X):
-        """
-        Make predictions with the model.
+        combined_features = torch.cat([last_hidden, avg_hidden, attn_hidden], dim=1)
         
-        Args:
-            X: Input features (shape: [samples, seq_length, n_features])
-            
-        Returns:
-            Dictionary of predictions with keys 'direction', 'category', 'regression'
-        """
-        if self.model is None:
-            raise ValueError("Model must be built and trained before making predictions")
+        volatility_pred = self.volatility_pathway(combined_features)
+        price_change_pred = self.price_change_pathway(combined_features)
+        spread_pred = self.spread_pathway(combined_features)
         
-        # Get raw predictions
-        direction_pred, category_pred, regression_pred = self.model.predict(X)
+        # Direction prediction with proper binary classification
+        direction_logits = self.direction_pathway(combined_features)
+        direction_prob = torch.sigmoid(direction_logits)
         
-        # Process predictions
-        direction_binary = (direction_pred > 0.5).astype(int)
-        category_classes = np.argmax(category_pred, axis=1)
-        
-        # Map category indices to labels
-        category_map = {
-            0: 'Large_Down',    # <= -5%
-            1: 'Medium_Down',   # -5% to -1%
-            2: 'Small',         # -1% to 1%
-            3: 'Medium_Up',     # 1% to 5%
-            4: 'Large_Up'       # >= 5%
+        return {
+            'direction_logits': direction_logits,
+            'direction_prob': direction_prob,
+            'volatility': volatility_pred,
+            'price_change': price_change_pred,
+            'spread': spread_pred
         }
-        category_labels = np.array([category_map[i] for i in category_classes])
-        
-        # Return dictionary of predictions
-        predictions = {
-            'direction': direction_binary,
-            'direction_prob': direction_pred,
-            'category': category_labels,
-            'category_prob': category_pred,
-            'price_change_pct': regression_pred.flatten()
-        }
-        
-        return predictions
     
-    def save(self, filepath):
-        """Save the model to a file."""
-        if self.model is None:
-            raise ValueError("Model must be built before saving")
-        
-        self.model.save(filepath)
-        logger.info(f"Model saved to {filepath}")
+    def predict_direction(self, direction_prob):
+        # Convert probability to binary prediction
+        return (direction_prob >= self.direction_threshold).float()
     
-    def load(self, filepath):
-        """Load the model from a file."""
-        self.model = keras.models.load_model(filepath)
-        logger.info(f"Model loaded from {filepath}")
-        
-        # Update model parameters based on the loaded model
-        input_shape = self.model.input_shape
-        self.seq_length = input_shape[1]
-        self.n_features = input_shape[2]
-        
-        return self.model
+    def get_prediction_confidence(self, direction_prob):
+        # Calculate confidence as distance from decision boundary
+        return torch.abs(direction_prob - self.direction_threshold) * 2
 
 
-# Example usage
-if __name__ == "__main__":
-    # Synthetic data for demonstration
-    seq_length = 24
-    n_features = 50
-    n_samples = 1000
-    
-    # Generate random sequences
-    X = np.random.randn(n_samples, seq_length, n_features)
-    
-    # Generate random targets
-    y_direction = np.random.randint(0, 2, size=(n_samples,))
-    y_category = np.random.randint(0, 5, size=(n_samples,))
-    y_category_onehot = np.eye(5)[y_category]
-    y_regression = np.random.randn(n_samples,) * 5
-    
-    y = {
-        'direction': y_direction,
-        'category': y_category_onehot,
-        'regression': y_regression
-    }
-    
-    # Create and train model
-    model = CryptoTransformer(seq_length=seq_length, n_features=n_features)
-    model.build_model()
-    
-    # Train for just a few epochs with synthetic data
-    history = model.fit(X, y, epochs=5, batch_size=32)
-    
-    # Make predictions
-    predictions = model.predict(X[:5])
-    
-    # Print sample predictions
-    for i in range(5):
-        logger.info(f"Sample {i+1}:")
-        logger.info(f"  Direction: {'Up' if predictions['direction'][i] == 1 else 'Down'} ({predictions['direction_prob'][i][0]:.4f})")
-        logger.info(f"  Category: {predictions['category'][i]} (Probs: {predictions['category_prob'][i]})")
-        logger.info(f"  Price Change %: {predictions['price_change_pct'][i]:.2f}%")
+class FocalLoss(nn.Module):
+    def __init__(self, gamma=2.0, alpha=0.25):
+        super().__init__()
+        self.gamma = gamma
+        self.alpha = alpha
+        
+    def forward(self, inputs, targets):
+        # Apply label smoothing
+        targets = targets * 0.9 + 0.05
+        
+        # Calculate focal loss
+        bce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction='none')
+        pt = torch.exp(-bce_loss)
+        focal_loss = self.alpha * (1-pt)**self.gamma * bce_loss
+        
+        return focal_loss.mean()
