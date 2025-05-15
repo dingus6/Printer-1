@@ -41,7 +41,7 @@ plt.xlabel('Direction')
 plt.ylabel('Count')
 plt.savefig('data_analysis/direction_distribution.png')
 
-# Analyze price changes
+# Analyse price changes
 merged_data['PriceChangePercent'] = (merged_data['Close'] - merged_data['Open']) / merged_data['Open']
 price_changes = merged_data['PriceChangePercent']
 print(f"\nPrice change statistics:")
