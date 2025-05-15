@@ -15,7 +15,7 @@ def print_parameter_details(model):
     details["Input Embedding"] = input_params
     total_params += input_params
     
-    # Positional encoding (typically not trainable)
+    # Positional encoding
     pos_params = sum(p.numel() for p in model.positional_encoding.parameters() if p.requires_grad)
     if pos_params > 0:
         details["Positional Encoding"] = pos_params
