@@ -18,7 +18,7 @@ preprocessor = FinancialDataPreprocessor(
 # Get the merged data with all datasets
 merged_data = preprocessor._merge_all_data()
 
-# Analyze the "IsUp" distribution
+# Analyse the "IsUp" distribution
 is_up_count = merged_data['IsUp'].value_counts()
 print("\nDirection distribution in full dataset:")
 print(is_up_count)
