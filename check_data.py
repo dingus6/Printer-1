@@ -8,7 +8,7 @@ from data_preprocessor import FinancialDataPreprocessor
 os.makedirs('data_analysis', exist_ok=True)
 os.makedirs('data_analysis/liquidations', exist_ok=True)
 
-# Initialize the preprocessor with the new liquidations data
+# Initialise the preprocessor with the new liquidations data
 preprocessor = FinancialDataPreprocessor(
     hourly_data_path='/root/hlmmnn/hourly_data.csv',
     fear_greed_data_path='/root/hlmmnn/fear_greed_data/fear_greed_index_enhanced.csv',
