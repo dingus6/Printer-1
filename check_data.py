@@ -87,7 +87,7 @@ for stat in price_direction_stats:
 
 # ============ LIQUIDATIONS DATA ANALYSIS ============
 
-# Check if liquidations data is available
+# Check if liquidation data is available
 if preprocessor.liquidations_data is not None:
     liq_data = preprocessor.liquidations_data
     
