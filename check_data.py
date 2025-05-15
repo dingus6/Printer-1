@@ -103,7 +103,7 @@ if preprocessor.liquidations_data is not None:
     
     print(liq_data[stats_cols].describe())
     
-    # Analyze correlation between liquidations and price movement
+    # Analyse correlation between liquidations and price movement
     print("\nCorrelation between liquidations and price movement:")
     correlation_data = merged_data[['IsUp', 'PriceChangePercent', 'Returns', 'Volatility']].copy()
     
