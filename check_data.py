@@ -60,7 +60,7 @@ plt.ylabel('Frequency')
 plt.grid(True, alpha=0.3)
 plt.savefig('data_analysis/price_change_distribution.png')
 
-# Analyze the relationship between window size and price movements
+# Analyse the relationship between window size and price movements
 window_sizes = [4, 8, 12, 24]
 price_direction_stats = []
 for window in window_sizes:
