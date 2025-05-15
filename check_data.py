@@ -85,7 +85,7 @@ print("\nDirection distribution by window size:")
 for stat in price_direction_stats:
     print(f"Window Size {stat['Window Size']}: {stat['Up_pct']:.2f}% Up, {stat['Down_pct']:.2f}% Down (n={stat['Count']})")
 
-# ============ LIQUIDATIONS DATA ANALYSIS ============
+# ============ LIQUIDATION DATA ANALYSIS ============
 
 # Check if liquidation data is available
 if preprocessor.liquidations_data is not None:
