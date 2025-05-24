@@ -121,3 +121,4 @@ print("\nData analysis complete. Check the data_analysis directory for plots.")
 
 #add new data sources - OI (Open Interest) and Funding
 #add indicators - VIX, MOVE index
+#add macroeconomic
