@@ -119,6 +119,6 @@ if preprocessor.liquidations_data is not None:
 # Print completion message
 print("\nData analysis complete. Check the data_analysis directory for plots.")
 
-#add new data sources - OI (Open Interest) and Funding - Aggregated (Use largest exchange by Volume) Coinalyze API - Binance, Hyperliquid, Bybit
+#add new data sources - OI (Open Interest) and Funding - Aggregated (Use largest exchange by Volume) Coinalyze API - Binance, Hyperliquid, Bybit, Deribit
 #add indicators - VIX, MOVE index,
 #add macroeconomic indicators - US rates
