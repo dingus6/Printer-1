@@ -122,4 +122,4 @@ print("\nData analysis complete. Check the data_analysis directory for plots.")
 #add new data sources - OI (Open Interest) and Funding - Aggregated (Use largest exchange by Volume) Coinalyze API - Binance, Hyperliquid, Bybit, Deribit
 #add indicators - VIX, MOVE index,
 #add macroeconomic indicators - US rates, labour markets, inflation
-#calculate new indicators from price data - MA's (4hr, 8hr, 16hr, 24hr), MACD (4hr, 8hr
+#calculate new indicators from price data - MA's (4hr, 8hr, 16hr, 24hr), MACD (4hr, 8hr, 16hr, 24hr)
